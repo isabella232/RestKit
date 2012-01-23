@@ -113,14 +113,27 @@ BOOL RKObjectIsValueEqualToValue(id sourceValue, id destinationValue) {
 - (NSDate*)parseDateFromString:(NSString*)string {
     RKLogTrace(@"Transforming string value '%@' to NSDate...", string);
     
-	NSDate* date = nil;
-    for (NSDateFormatter *dateFormatter in self.objectMapping.dateFormatters) {
-        @synchronized(dateFormatter) {
+    NSDate* date = nil;
+    
+    NSNumberFormatter *numberFormatter = [[NSNumberFormatter alloc] init];
+    numberFormatter.numberStyle = NSNumberFormatterDecimalStyle;
+
+    NSNumber *numeric = [numberFormatter numberFromString:string];
+
+    [numberFormatter release];
+    
+    if (numeric) {
+        date = [NSDate dateWithTimeIntervalSince1970:[numeric doubleValue]];
+    } else {
+        for (NSDateFormatter *dateFormatter in self.objectMapping.dateFormatters) {
+          @synchronized(dateFormatter) {
             date = [dateFormatter dateFromString:string];
+          }
+            
+          if (date) {
+            break;
+          }
         }
-        if (date) {
-			break;
-		}
     }
     
     return date;
@@ -176,7 +189,7 @@ BOOL RKObjectIsValueEqualToValue(id sourceValue, id destinationValue) {
         }
     } else if ([sourceType isSubclassOfClass:[NSNumber class]] && [destinationType isSubclassOfClass:[NSDate class]]) {
         // Number -> Date
-        return [NSDate dateWithTimeIntervalSince1970:[(NSNumber*)value intValue]];
+        return [NSDate dateWithTimeIntervalSince1970:[(NSNumber*)value doubleValue]];
     } else if ([sourceType isSubclassOfClass:[NSNumber class]] && [destinationType isSubclassOfClass:[NSDecimalNumber class]]) {
         // Number -> Decimal Number
         return [NSDecimalNumber decimalNumberWithDecimal:[value decimalValue]];
@@ -208,8 +221,8 @@ BOOL RKObjectIsValueEqualToValue(id sourceValue, id destinationValue) {
 - (BOOL)validateValue:(id)value atKeyPath:(NSString*)keyPath {
     BOOL success = YES;        
     
-    if (self.objectMapping.performKeyValueValidation && [self.destinationObject respondsToSelector:@selector(validateValue:forKey:error:)]) {
-        success = [self.destinationObject validateValue:&value forKey:keyPath error:&_validationError];
+    if (self.objectMapping.performKeyValueValidation && [self.destinationObject respondsToSelector:@selector(validateValue:forKeyPath:error:)]) {
+        success = [self.destinationObject validateValue:&value forKeyPath:keyPath error:&_validationError];
         if (!success) {                        
             if (_validationError) {
                 RKLogError(@"Validation failed while mapping attribute at key path %@ to value %@. Error: %@", keyPath, value, [_validationError localizedDescription]);
@@ -298,7 +311,7 @@ BOOL RKObjectIsValueEqualToValue(id sourceValue, id destinationValue) {
     if ([self shouldSetValue:value atKeyPath:attributeMapping.destinationKeyPath]) {
         RKLogTrace(@"Mapped attribute value from keyPath '%@' to '%@'. Value: %@", attributeMapping.sourceKeyPath, attributeMapping.destinationKeyPath, value);
         
-        [self.destinationObject setValue:value forKey:attributeMapping.destinationKeyPath];
+        [self.destinationObject setValue:value forKeyPath:attributeMapping.destinationKeyPath];
         if ([self.delegate respondsToSelector:@selector(objectMappingOperation:didSetValue:forKeyPath:usingMapping:)]) {
             [self.delegate objectMappingOperation:self didSetValue:value forKeyPath:attributeMapping.destinationKeyPath usingMapping:attributeMapping];
         }        
@@ -340,7 +353,7 @@ BOOL RKObjectIsValueEqualToValue(id sourceValue, id destinationValue) {
             // Optionally set the default value for missing values
             if ([self.objectMapping shouldSetDefaultValueForMissingAttributes]) {
                 [self.destinationObject setValue:[self.objectMapping defaultValueForMissingAttribute:attributeMapping.destinationKeyPath] 
-                                          forKey:attributeMapping.destinationKeyPath];
+                                      forKeyPath:attributeMapping.destinationKeyPath];
                 RKLogTrace(@"Setting nil for missing attribute value at keyPath '%@'", attributeMapping.sourceKeyPath);
             }
         }
@@ -388,7 +401,7 @@ BOOL RKObjectIsValueEqualToValue(id sourceValue, id destinationValue) {
             // Optionally nil out the property
             if ([self.objectMapping setNilForMissingRelationships] && [self shouldSetValue:nil atKeyPath:relationshipMapping.destinationKeyPath]) {
                 RKLogTrace(@"Setting nil for missing relationship value at keyPath '%@'", relationshipMapping.sourceKeyPath);
-                [self.destinationObject setValue:nil forKey:relationshipMapping.destinationKeyPath];
+                [self.destinationObject setValue:nil forKeyPath:relationshipMapping.destinationKeyPath];
             }
             
             continue;
@@ -480,7 +493,7 @@ BOOL RKObjectIsValueEqualToValue(id sourceValue, id destinationValue) {
                     }
                 } else {
                     RKLogTrace(@"Mapped relationship object from keyPath '%@' to '%@'. Value: %@", relationshipMapping.sourceKeyPath, relationshipMapping.destinationKeyPath, destinationObject);
-                    [self.destinationObject setValue:destinationObject forKey:relationshipMapping.destinationKeyPath];
+                    [self.destinationObject setValue:destinationObject forKeyPath:relationshipMapping.destinationKeyPath];
                 }
             }
         } else {
@@ -504,7 +517,7 @@ BOOL RKObjectIsValueEqualToValue(id sourceValue, id destinationValue) {
         // If the relationship has changed, set it
         if ([self shouldSetValue:destinationObject atKeyPath:relationshipMapping.destinationKeyPath]) {
             RKLogTrace(@"Mapped relationship object from keyPath '%@' to '%@'. Value: %@", relationshipMapping.sourceKeyPath, relationshipMapping.destinationKeyPath, destinationObject);
-            [self.destinationObject setValue:destinationObject forKey:relationshipMapping.destinationKeyPath];
+            [self.destinationObject setValue:destinationObject forKeyPath:relationshipMapping.destinationKeyPath];
         }
         
         // Fail out if a validation error has occurred

@@ -29,6 +29,7 @@
 #import "RKParserRegistry.h"
 #import "RKRequest_Internals.h"
 #import "RKObjectSerializer.h"
+#import "RKObjectMappingProvider+Contexts.h"
 
 // Set Logging Component
 #undef RKLogComponent
@@ -40,30 +41,33 @@
 
 @implementation RKObjectLoader
 
-@synthesize objectManager = _objectManager, response = _response;
+@synthesize mappingProvider = _mappingProvider, response = _response;
 @synthesize targetObject = _targetObject, objectMapping = _objectMapping;
 @synthesize result = _result;
 @synthesize serializationMapping = _serializationMapping;
 @synthesize serializationMIMEType = _serializationMIMEType;
 @synthesize sourceObject = _sourceObject;
+@synthesize onDidFailWithError;
+@synthesize onDidLoadObject;
+@synthesize onDidLoadObjects;
+@synthesize onDidLoadObjectsDictionary;
 
-+ (id)loaderWithResourcePath:(NSString*)resourcePath objectManager:(RKObjectManager*)objectManager delegate:(id<RKObjectLoaderDelegate>)delegate {
-    return [[[self alloc] initWithResourcePath:resourcePath objectManager:objectManager delegate:delegate] autorelease];
++ (id)loaderWithURL:(RKURL *)URL mappingProvider:(RKObjectMappingProvider *)mappingProvider {
+    return [[[self alloc] initWithURL:URL mappingProvider:mappingProvider] autorelease];
 }
 
-- (id)initWithResourcePath:(NSString*)resourcePath objectManager:(RKObjectManager*)objectManager delegate:(id<RKObjectLoaderDelegate>)delegate {
-	if ((self = [super initWithURL:[objectManager.client URLForResourcePath:resourcePath] delegate:delegate])) {		
-        _objectManager = objectManager;
-        [self.objectManager.client setupRequest:self];
-	}
-
-	return self;
+- (id)initWithURL:(RKURL *)URL mappingProvider:(RKObjectMappingProvider *)mappingProvider {
+    self = [super initWithURL:URL];
+    if (self) {
+        _mappingProvider = [mappingProvider retain];
+    }
+    
+    return self;
 }
 
 - (void)dealloc {
-    // Weak reference
-    _objectManager = nil;
-    
+    [_mappingProvider release];
+    _mappingProvider = nil;
     [_sourceObject release];
     _sourceObject = nil;
 	[_targetObject release];
@@ -75,7 +79,17 @@
     [_result release];
     _result = nil;
     [_serializationMIMEType release];
+    _serializationMIMEType = nil;
     [_serializationMapping release];
+    _serializationMapping = nil;    
+    [onDidFailWithError release];
+    onDidFailWithError = nil;
+    [onDidLoadObject release];
+    onDidLoadObject = nil;
+    [onDidLoadObjects release];
+    onDidLoadObjects = nil;
+    [onDidLoadObjectsDictionary release];
+    onDidLoadObjectsDictionary = nil;
     
 	[super dealloc];
 }
@@ -86,6 +100,14 @@
     _response = nil;
     [_result release];
     _result = nil;
+}
+
+- (void)informDelegateOfError:(NSError *)error {
+    [(NSObject<RKObjectLoaderDelegate>*)_delegate objectLoader:self didFailWithError:error];
+    
+    if (self.onDidFailWithError) {
+        self.onDidFailWithError(error);
+    }
 }
 
 #pragma mark - Response Processing
@@ -121,17 +143,32 @@
     NSAssert([NSThread isMainThread], @"RKObjectLoaderDelegate callbacks must occur on the main thread");
     
 	RKObjectMappingResult* result = [RKObjectMappingResult mappingResultWithDictionary:resultDictionary];
-
+    
+    // Dictionary callback
     if ([self.delegate respondsToSelector:@selector(objectLoader:didLoadObjectDictionary:)]) {
         [(NSObject<RKObjectLoaderDelegate>*)self.delegate objectLoader:self didLoadObjectDictionary:[result asDictionary]];
     }
     
+    if (self.onDidLoadObjectsDictionary) {
+        self.onDidLoadObjectsDictionary([result asDictionary]);
+    }
+    
+    // Collection callback
     if ([self.delegate respondsToSelector:@selector(objectLoader:didLoadObjects:)]) {
         [(NSObject<RKObjectLoaderDelegate>*)self.delegate objectLoader:self didLoadObjects:[result asCollection]];
     }
     
+    if (self.onDidLoadObjects) {
+        self.onDidLoadObjects([result asCollection]);
+    }
+    
+    // Singular object callback
     if ([self.delegate respondsToSelector:@selector(objectLoader:didLoadObject:)]) {
         [(NSObject<RKObjectLoaderDelegate>*)self.delegate objectLoader:self didLoadObject:[result asObject]];
+    }
+    
+    if (self.onDidLoadObject) {
+        self.onDidLoadObject([result asObject]);
     }
     
 	[self finalizeLoad:YES error:nil];
@@ -152,7 +189,7 @@
 
 #pragma mark - Response Object Mapping
 
-- (RKObjectMappingResult*)mapResponseWithMappingProvider:(RKObjectMappingProvider*)mappingProvider toObject:(id)targetObject error:(NSError**)error {
+- (RKObjectMappingResult*)mapResponseWithMappingProvider:(RKObjectMappingProvider*)mappingProvider toObject:(id)targetObject inContext:(RKObjectMappingProviderContext)context error:(NSError**)error {
     id<RKParser> parser = [[RKParserRegistry sharedRegistry] parserForMIMEType:self.response.MIMEType];
     NSAssert1(parser, @"Cannot perform object load without a parser for MIME Type '%@'", self.response.MIMEType);
     
@@ -183,6 +220,7 @@
     RKObjectMapper* mapper = [RKObjectMapper mapperWithObject:parsedData mappingProvider:mappingProvider];
     mapper.targetObject = targetObject;
     mapper.delegate = self;
+    mapper.context = context;
     RKObjectMappingResult* result = [mapper performMapping];
     
     // Log any mapping errors
@@ -200,21 +238,32 @@
     return result;
 }
 
+- (RKObjectMapping *)configuredObjectMapping {
+    if (self.objectMapping) {
+        return self.objectMapping;
+    }
+    
+    return [self.mappingProvider objectMappingForResourcePath:self.resourcePath];
+}
+
 - (RKObjectMappingResult*)performMapping:(NSError**)error {
     NSAssert(_sentSynchronously || ![NSThread isMainThread], @"Mapping should occur on a background thread");
     
     RKObjectMappingProvider* mappingProvider;
-    if (self.objectMapping) {
-        NSString* rootKeyPath = self.objectMapping.rootKeyPath ? self.objectMapping.rootKeyPath : @"";
-        RKLogDebug(@"Found directly configured object mapping, creating temporary mapping provider for keyPath %@", rootKeyPath);
-        mappingProvider = [[RKObjectMappingProvider new] autorelease];        
-        [mappingProvider setMapping:self.objectMapping forKeyPath:rootKeyPath];
+    RKObjectMapping *configuredObjectMapping = [self configuredObjectMapping];
+    if (configuredObjectMapping) {        
+        mappingProvider = [RKObjectMappingProvider mappingProvider];
+        NSString *rootKeyPath = configuredObjectMapping.rootKeyPath ? configuredObjectMapping.rootKeyPath : @"";
+        [mappingProvider setMapping:configuredObjectMapping forKeyPath:rootKeyPath];
+        
+        // Copy the error mapping from our configured mappingProvider
+        mappingProvider.errorMapping = self.mappingProvider.errorMapping;
     } else {
         RKLogDebug(@"No object mapping provider, using mapping provider from parent object manager to perform KVC mapping");
-        mappingProvider = self.objectManager.mappingProvider;
+        mappingProvider = self.mappingProvider;
     }
     
-    return [self mapResponseWithMappingProvider:mappingProvider toObject:self.targetObject error:error];
+    return [self mapResponseWithMappingProvider:mappingProvider toObject:self.targetObject inContext:RKObjectMappingProviderContextObjectsByKeyPath error:error];
 }
     
 
@@ -248,7 +297,7 @@
     }
     
 	if ([self.response isFailure]) {
-		[(NSObject<RKObjectLoaderDelegate>*)_delegate objectLoader:self didFailWithError:self.response.failureError];
+        [self informDelegateOfError:self.response.failureError];
         
 		[self finalizeLoad:NO error:self.response.failureError];
         
@@ -263,8 +312,8 @@
         NSError* error = [NSError errorWithDomain:RKRestKitErrorDomain code:RKObjectLoaderUnexpectedResponseError userInfo:nil];
         if ([_delegate respondsToSelector:@selector(objectLoaderDidLoadUnexpectedResponse:)]) {
             [(NSObject<RKObjectLoaderDelegate>*)_delegate objectLoaderDidLoadUnexpectedResponse:self];
-        } else {            
-            [(NSObject<RKObjectLoaderDelegate>*)_delegate objectLoader:self didFailWithError:error];
+        } else {
+            [self informDelegateOfError:error];
         }
         
         // NOTE: We skip didFailLoadWithError: here so that we don't send the delegate
@@ -284,15 +333,15 @@
 - (void)handleResponseError {
     // Since we are mapping what we know to be an error response, we don't want to map the result back onto our
     // target object
-    NSError* error = nil;
-    RKObjectMappingResult* result = [self mapResponseWithMappingProvider:self.objectManager.mappingProvider toObject:nil error:&error];
+    NSError *error = nil;
+    RKObjectMappingResult *result = [self mapResponseWithMappingProvider:self.mappingProvider toObject:nil inContext:RKObjectMappingProviderContextErrors error:&error];
     if (result) {
         error = [result asError];
     } else {
         RKLogError(@"Encountered an error while attempting to map server side errors from payload: %@", [error localizedDescription]);
     }
     
-    [(NSObject<RKObjectLoaderDelegate>*)_delegate objectLoader:self didFailWithError:error];
+    [self informDelegateOfError:error];    
     [self finalizeLoad:NO error:error];    
 }
 
@@ -338,8 +387,7 @@
             [_delegate request:self didFailLoadWithError:error];
         }
         
-        [(NSObject<RKObjectLoaderDelegate>*)_delegate objectLoader:self didFailWithError:error];
-        
+        [self informDelegateOfError:error];        
         [self finalizeLoad:NO error:error];
     }
     
@@ -380,6 +428,33 @@
             [self performSelectorInBackground:@selector(performMappingOnBackgroundThread) withObject:nil];
         }
 	}
+}
+
+// Proxy the delegate property back to our superclass implementation. The object loader should
+// really not be a subclass of RKRequest.
+- (void)setDelegate:(id<RKObjectLoaderDelegate>)delegate {
+    [super setDelegate:delegate];
+}
+
+- (id<RKObjectLoaderDelegate>)delegate {
+    return (id<RKObjectLoaderDelegate>) [super delegate];
+}
+
+@end
+
+@implementation RKObjectLoader (Deprecations)
+
++ (id)loaderWithResourcePath:(NSString*)resourcePath objectManager:(RKObjectManager*)objectManager delegate:(id<RKObjectLoaderDelegate>)delegate {
+    return [[[self alloc] initWithResourcePath:resourcePath objectManager:objectManager delegate:delegate] autorelease];
+}
+
+- (id)initWithResourcePath:(NSString*)resourcePath objectManager:(RKObjectManager*)objectManager delegate:(id<RKObjectLoaderDelegate>)theDelegate {    
+	if ((self = [self initWithURL:[objectManager.baseURL URLByAppendingResourcePath:resourcePath] mappingProvider:objectManager.mappingProvider])) {
+        [objectManager.client configureRequest:self];
+        _delegate = theDelegate;
+	}
+    
+	return self;
 }
 
 @end

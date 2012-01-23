@@ -30,6 +30,7 @@
 #import "RKObjectMapper_Private.h"
 #import "RKObjectMapperError.h"
 #import "RKDynamicMappingModels.h"
+#import "RKObjectMappingProvider+Contexts.h"
 
 // Managed Object Serialization Specific
 #import "RKHuman.h"
@@ -436,7 +437,7 @@
     RKObjectMappingProvider* provider = [[RKObjectMappingProvider new] autorelease];
     [provider setMapping:mapping forKeyPath:@""];
     id mockProvider = [OCMockObject partialMockForObject:provider];
-    [[mockProvider expect] mappingsByKeyPath];
+    [[mockProvider expect] valueForContext:RKObjectMappingProviderContextObjectsByKeyPath];
         
     id userInfo = RKSpecParseFixture(@"user.json");
     RKObjectMapper* mapper = [RKObjectMapper mapperWithObject:userInfo mappingProvider:mockProvider];
@@ -825,7 +826,7 @@
     [mockDelegate verify];
 }
 
-- (BOOL)fakeValidateValue:(inout id *)ioValue forKey:(NSString *)inKey error:(out NSError **)outError {
+- (BOOL)fakeValidateValue:(inout id *)ioValue forKeyPath:(NSString *)inKey error:(out NSError **)outError {
     *outError = [NSError errorWithDomain:RKRestKitErrorDomain code:1234 userInfo:nil];
     return NO;
 }
@@ -841,7 +842,7 @@
     RKObjectMapper* mapper = [RKObjectMapper mapperWithObject:userInfo mappingProvider:provider];
     RKExampleUser* exampleUser = [[RKExampleUser new] autorelease];
     id mockObject = [OCMockObject partialMockForObject:exampleUser];
-    [[[mockObject expect] andCall:@selector(fakeValidateValue:forKey:error:) onObject:self] validateValue:[OCMArg anyPointer] forKey:OCMOCK_ANY error:[OCMArg anyPointer]];
+    [[[mockObject expect] andCall:@selector(fakeValidateValue:forKeyPath:error:) onObject:self] validateValue:[OCMArg anyPointer] forKeyPath:OCMOCK_ANY error:[OCMArg anyPointer]];
     mapper.targetObject = mockObject;
     [[mockDelegate expect] objectMapper:mapper didFailMappingFromObject:userInfo toObject:[OCMArg any] withError:[OCMArg any] atKeyPath:@"" usingMapping:mapping];
     mapper.delegate = mockDelegate;
@@ -952,7 +953,7 @@
     NSMutableDictionary* dictionary = [NSDictionary dictionaryWithObjectsAndKeys:@"FAILURE", @"id", nil];
     RKExampleUser* user = [RKExampleUser user];
     id mockObject = [OCMockObject partialMockForObject:user];
-    [[[mockObject expect] andCall:@selector(fakeValidateValue:forKey:error:) onObject:self] validateValue:[OCMArg anyPointer] forKey:OCMOCK_ANY error:[OCMArg anyPointer]];
+    [[[mockObject expect] andCall:@selector(fakeValidateValue:forKeyPath:error:) onObject:self] validateValue:[OCMArg anyPointer] forKeyPath:OCMOCK_ANY error:[OCMArg anyPointer]];
     
     RKObjectMappingOperation* operation = [[RKObjectMappingOperation alloc] initWithSourceObject:dictionary destinationObject:mockObject mapping:mapping];
     NSError* error = nil;
@@ -1817,7 +1818,7 @@
 - (void)testShouldAutoConfigureDefaultDateFormatters {
     [RKObjectMapping setDefaultDateFormatters:nil];
     NSArray *dateFormatters = [RKObjectMapping defaultDateFormatters];
-    assertThat(dateFormatters, hasCountOf(2));
+    assertThat(dateFormatters, hasCountOf(3));
     assertThat([[dateFormatters objectAtIndex:0] dateFormat], is(equalTo(@"yyyy-MM-dd'T'HH:mm:ss'Z'")));
     assertThat([[dateFormatters objectAtIndex:1] dateFormat], is(equalTo(@"MM/dd/yyyy")));
     NSTimeZone *UTCTimeZone = [NSTimeZone timeZoneWithAbbreviation:@"UTC"];
@@ -1834,28 +1835,28 @@
 
 - (void)testShouldLetYouAppendADateFormatterToTheList {
     [RKObjectMapping setDefaultDateFormatters:nil];
-    assertThat([RKObjectMapping defaultDateFormatters], hasCountOf(2));
+    assertThat([RKObjectMapping defaultDateFormatters], hasCountOf(3));
     NSDateFormatter *dateFormatter = [NSDateFormatter new];
     [RKObjectMapping addDefaultDateFormatter:dateFormatter];
-    assertThat([RKObjectMapping defaultDateFormatters], hasCountOf(3));
+    assertThat([RKObjectMapping defaultDateFormatters], hasCountOf(4));
 }
 
 - (void)testShouldLetYouConfigureANewDateFormatterFromAStringAndATimeZone {
     [RKObjectMapping setDefaultDateFormatters:nil];
-    assertThat([RKObjectMapping defaultDateFormatters], hasCountOf(2));
+    assertThat([RKObjectMapping defaultDateFormatters], hasCountOf(3));
     NSTimeZone *EDTTimeZone = [NSTimeZone timeZoneWithAbbreviation:@"EDT"];
     [RKObjectMapping addDefaultDateFormatterForString:@"mm/dd/YYYY" inTimeZone:EDTTimeZone];
-    assertThat([RKObjectMapping defaultDateFormatters], hasCountOf(3));
-    NSDateFormatter *dateFormatter = [[RKObjectMapping defaultDateFormatters] objectAtIndex:2];
+    assertThat([RKObjectMapping defaultDateFormatters], hasCountOf(4));
+    NSDateFormatter *dateFormatter = [[RKObjectMapping defaultDateFormatters] objectAtIndex:3];
     assertThat(dateFormatter.timeZone, is(equalTo(EDTTimeZone)));
 }
 
 - (void)testShouldConfigureANewDateFormatterInTheUTCTimeZoneIfPassedANilTimeZone {
     [RKObjectMapping setDefaultDateFormatters:nil];
-    assertThat([RKObjectMapping defaultDateFormatters], hasCountOf(2));
-    [RKObjectMapping addDefaultDateFormatterForString:@"mm/dd/YYYY" inTimeZone:nil];
     assertThat([RKObjectMapping defaultDateFormatters], hasCountOf(3));
-    NSDateFormatter *dateFormatter = [[RKObjectMapping defaultDateFormatters] objectAtIndex:2];
+    [RKObjectMapping addDefaultDateFormatterForString:@"mm/dd/YYYY" inTimeZone:nil];
+    assertThat([RKObjectMapping defaultDateFormatters], hasCountOf(4));
+    NSDateFormatter *dateFormatter = [[RKObjectMapping defaultDateFormatters] objectAtIndex:3];
     NSTimeZone *UTCTimeZone = [NSTimeZone timeZoneWithAbbreviation:@"UTC"];
     assertThat(dateFormatter.timeZone, is(equalTo(UTCTimeZone)));
 }

@@ -3,7 +3,7 @@
 //  RestKit
 //
 //  Created by Blake Watters on 8/8/09.
-//  Copyright 2009 Two Toasters
+//  Copyright 2009 RestKit
 //  
 //  Licensed under the Apache License, Version 2.0 (the "License");
 //  you may not use this file except in compliance with the License.
@@ -22,9 +22,25 @@
 #import "RKObjectMapping.h"
 #import "RKObjectMappingResult.h"
 
-@class RKObjectManager;
+@class RKObjectMappingProvider;
 @class RKObjectLoader;
 
+// Block Types
+typedef void(^RKObjectLoaderBlock)(RKObjectLoader *loader);
+typedef void(^RKObjectLoaderDidFailWithErrorBlock)(NSError *error);
+typedef void(^RKObjectLoaderDidLoadObjectsBlock)(NSArray *objects);
+typedef void(^RKObjectLoaderDidLoadObjectBlock)(id object);
+typedef void(^RKObjectLoaderDidLoadObjectsDictionaryBlock)(NSDictionary *dictionary);
+
+/**
+ The delegate of an RKObjectLoader object must adopt the RKObjectLoaderDelegate protocol. Optional
+ methods of the protocol allow the delegate to handle asynchronous object mapping operations performed
+ by the object loader. Also note that the RKObjectLoaderDelegate protocol incorporates the 
+ RKRequestDelegate protocol and the delegate may provide implementations of methods from RKRequestDelegate
+ as well.
+ 
+ @see RKRequestDelegate
+ */
 @protocol RKObjectLoaderDelegate <RKRequestDelegate>
 
 @required
@@ -32,7 +48,7 @@
 /**
  * Sent when an object loaded failed to load the collection due to an error
  */
-- (void)objectLoader:(RKObjectLoader*)objectLoader didFailWithError:(NSError*)error;
+- (void)objectLoader:(RKObjectLoader *)objectLoader didFailWithError:(NSError *)error;
 
 @optional
 
@@ -41,7 +57,7 @@
  and loaded a collection of objects. All objects mapped from the remote payload will be returned
  as a single array.
  */
-- (void)objectLoader:(RKObjectLoader*)objectLoader didLoadObjects:(NSArray*)objects;
+- (void)objectLoader:(RKObjectLoader *)objectLoader didLoadObjects:(NSArray *)objects;
 
 /**
  When implemented, sent to the delegate when the object loader has completed succesfully. 
@@ -49,19 +65,19 @@
  in the collection will be sent with this delegate method. This method simplifies things
  when you know you are working with a single object reference.
  */
-- (void)objectLoader:(RKObjectLoader*)objectLoader didLoadObject:(id)object;
+- (void)objectLoader:(RKObjectLoader *)objectLoader didLoadObject:(id)object;
 
 /**
  When implemented, sent to the delegate when an object loader has completed successfully. The
  dictionary will be expressed as pairs of keyPaths and objects mapped from the payload. This
  method is useful when you have multiple root objects and want to differentiate them by keyPath.
  */
-- (void)objectLoader:(RKObjectLoader*)objectLoader didLoadObjectDictionary:(NSDictionary*)dictionary;
+- (void)objectLoader:(RKObjectLoader *)objectLoader didLoadObjectDictionary:(NSDictionary *)dictionary;
 
 /**
  Invoked when the object loader has finished loading
  */
-- (void)objectLoaderDidFinishLoading:(RKObjectLoader*)objectLoader;
+- (void)objectLoaderDidFinishLoading:(RKObjectLoader *)objectLoader;
 
 /**
  Sent when an object loader encounters a response status code or MIME Type that RestKit does not know how to handle.
@@ -86,7 +102,7 @@
  
  @optional
  */
-- (void)objectLoaderDidLoadUnexpectedResponse:(RKObjectLoader*)objectLoader;
+- (void)objectLoaderDidLoadUnexpectedResponse:(RKObjectLoader *)objectLoader;
 
 /**
  Invoked just after parsing has completed, but before object mapping begins. This can be helpful
@@ -97,7 +113,7 @@
  Note that the mappable data is a pointer to a pointer to allow you to replace the mappable data
  with a new object to be mapped. You must dereference it to access the value.
  */
-- (void)objectLoader:(RKObjectLoader*)loader willMapData:(inout id *)mappableData;
+- (void)objectLoader:(RKObjectLoader *)loader willMapData:(inout id *)mappableData;
 
 @end
 
@@ -109,7 +125,7 @@
  * includes Core Data specific mapping logic.
  */
 @interface RKObjectLoader : RKRequest {	
-    RKObjectManager* _objectManager;
+    RKObjectMappingProvider *_mappingProvider;
     RKResponse* _response;
     RKObjectMapping* _objectMapping;
     RKObjectMappingResult* _result;
@@ -118,6 +134,49 @@
     NSObject* _sourceObject;
 	NSObject* _targetObject;
 }
+
+/**
+ The object that acts as the delegate of the receiving object loader.
+ 
+ @see RKRequestDelegate
+ */
+@property (nonatomic, assign) id<RKObjectLoaderDelegate> delegate;
+
+/**
+ The block to invoke when the object loader fails due to an error.
+ 
+ @see [RKObjectLoaderDelegate objectLoader:didFailWithError:]
+ */
+@property (nonatomic, copy) RKObjectLoaderDidFailWithErrorBlock onDidFailWithError;
+
+/**
+ The block to invoke when the object loader has completed object mapping and the consumer
+ wishes to retrieve a single object from the mapping result.
+ 
+ @see [RKObjectLoaderDelegate objectLoader:didLoadObject:]
+ @see RKObjectMappingResult
+ */
+@property (nonatomic, copy) RKObjectLoaderDidLoadObjectBlock onDidLoadObject;
+
+/**
+ The block to invoke when the object loader has completed object mapping and the consumer
+ wishes to retrieve an collections of objects from the mapping result.
+ 
+ @see [RKObjectLoaderDelegate objectLoader:didLoadObjects:]
+ @see RKObjectMappingResult
+ */
+@property (nonatomic, copy) RKObjectLoaderDidLoadObjectsBlock onDidLoadObjects;
+
+/**
+ The block to invoke when the object loader has completed object mapping and the consumer
+ wishes to retrieve the entire mapping result as a dictionary. Each key within the
+ dictionary will correspond to a mapped keyPath within the source JSON/XML and the value
+ will be the object mapped result.
+ 
+ @see [RKObjectLoaderDelegate objectLoader:didLoadObjects:]
+ @see RKObjectMappingResult
+ */
+@property (nonatomic, copy) RKObjectLoaderDidLoadObjectsDictionaryBlock onDidLoadObjectsDictionary;
 
 /**
  * The object mapping to use when processing the response. If this is nil,
@@ -129,26 +188,27 @@
  * @default nil
  * @see RKObjectMappingProvider
  */
-// TODO: Rename to responseMapping
-@property (nonatomic, retain) RKObjectMapping* objectMapping;
+@property (nonatomic, retain) RKObjectMapping *objectMapping;
 
 /**
- * The object manager that initialized this loader. The object manager is responsible
- * for supplying the mapper and object store used after HTTP transport is completed
+ A mapping provider containing object mapping configurations for mapping remote
+ object representations into local domain objects.
+ 
+ @see RKObjectMappingProvider
  */
-@property (nonatomic, readonly) RKObjectManager* objectManager;
+@property (nonatomic, retain) RKObjectMappingProvider *mappingProvider;
 
 /**
  * The underlying response object for this loader
  */
-@property (nonatomic, readonly) RKResponse* response;
+@property (nonatomic, readonly) RKResponse *response;
 
 /**
  * The mapping result that was produced after the request finished loading and
  * object mapping has completed. Provides access to the final products of the
  * object mapper in a variety of formats.
  */
-@property (nonatomic, readonly) RKObjectMappingResult* result;
+@property (nonatomic, readonly) RKObjectMappingResult *result;
 
 ///////////////////////////////////////////////////////////////////////////////////////////
 // Serialization
@@ -159,8 +219,7 @@
  *
  * @see RKObjectMappingProvider
  */
-// TODO: Rename to requestMapping?
-@property (nonatomic, retain) RKObjectMapping* serializationMapping;
+@property (nonatomic, retain) RKObjectMapping *serializationMapping;
 
 /**
  * The MIME Type to serialize the targetObject into according to the mapping
@@ -169,7 +228,7 @@
  *
  * @see RKMIMEType
  */
-@property (nonatomic, retain) NSString* serializationMIMEType;
+@property (nonatomic, retain) NSString *serializationMIMEType;
 
 /**
  The object being serialized for transport. This object will be transformed into a
@@ -177,32 +236,42 @@
  
  @see RKObjectSerializer
  */
-@property (nonatomic, retain) NSObject* sourceObject;
+@property (nonatomic, retain) NSObject *sourceObject;
 
 /**
  * The target object to map results back onto. If nil, a new object instance
  * for the appropriate mapping will be created. If not nil, the results will
  * be used to update the targetObject's attributes and relationships.
  */
-@property (nonatomic, retain) NSObject* targetObject;
+@property (nonatomic, retain) NSObject *targetObject;
 
 ///////////////////////////////////////////////////////////////////////////////////////////
 
 /**
- * Initialize and return an object loader for a resource path against an object manager. The resource path
- * specifies the remote location to load data from, while the object manager is responsible for supplying
- * mapping and persistence details.
+ Initialize and return an autoreleased object loader targeting a remote URL using a mapping provider
+ 
+ @param URL A RestKit RKURL targetting a particular baseURL and resourcePath
+ @param mappingProvider A mapping provider containing object mapping configurations for processing loaded payloads
  */
-+ (id)loaderWithResourcePath:(NSString*)resourcePath objectManager:(RKObjectManager*)objectManager delegate:(id<RKObjectLoaderDelegate>)delegate;
++ (id)loaderWithURL:(RKURL *)URL mappingProvider:(RKObjectMappingProvider *)mappingProvider;
 
 /**
- * Initialize a new object loader with an object manager, a request, and a delegate
+ Initialize and return an autoreleased object loader targeting a remote URL using a mapping provider
+ 
+ @param URL A RestKit RKURL targetting a particular baseURL and resourcePath
+ @param mappingProvider A mapping provider containing object mapping configurations for processing loaded payloads
  */
-- (id)initWithResourcePath:(NSString*)resourcePath objectManager:(RKObjectManager*)objectManager delegate:(id<RKObjectLoaderDelegate>)delegate;				
+- (id)initWithURL:(RKURL *)URL mappingProvider:(RKObjectMappingProvider *)mappingProvider;
 
 /**
  * Handle an error in the response preventing it from being mapped, called from -isResponseMappable
  */
 - (void)handleResponseError;
 
+@end
+
+@class RKObjectManager;
+@interface RKObjectLoader (Deprecations)
++ (id)loaderWithResourcePath:(NSString*)resourcePath objectManager:(RKObjectManager*)objectManager delegate:(id<RKObjectLoaderDelegate>)delegate DEPRECATED_ATTRIBUTE;
+- (id)initWithResourcePath:(NSString*)resourcePath objectManager:(RKObjectManager*)objectManager delegate:(id<RKObjectLoaderDelegate>)delegate DEPRECATED_ATTRIBUTE;
 @end

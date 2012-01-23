@@ -22,6 +22,7 @@
 #import "RKObjectRelationshipMapping.h"
 #import "RKObjectPropertyInspector.h"
 #import "RKLog.h"
+#import "RKISO8601DateFormatter.h"
 
 // Constants
 NSString* const RKObjectMappingNestingAttributeKeyName = @"<RK_NESTING_ATTRIBUTE>";
@@ -121,7 +122,7 @@ NSString* const RKObjectMappingNestingAttributeKeyName = @"<RK_NESTING_ATTRIBUTE
 }
 
 - (NSString*)description {
-    return [NSString stringWithFormat:@"RKObjectMapping class => %@: keyPath mappings => %@", NSStringFromClass(self.objectClass), _mappings];
+    return [NSString stringWithFormat:@"<%@:%p objectClass=%@ keyPath mappings => %@>", NSStringFromClass([self class]), self, NSStringFromClass(self.objectClass), _mappings];
 }
 
 - (id)mappingForKeyPath:(NSString*)keyPath {
@@ -307,6 +308,10 @@ static NSDateFormatter *preferredDateFormatter = nil;
         // Setup the default formatters
         [self addDefaultDateFormatterForString:@"yyyy-MM-dd'T'HH:mm:ss'Z'" inTimeZone:nil];
         [self addDefaultDateFormatterForString:@"MM/dd/yyyy" inTimeZone:nil];
+        
+        RKISO8601DateFormatter *isoFormatter = [[RKISO8601DateFormatter alloc] init];
+        [self addDefaultDateFormatter:isoFormatter];
+        [isoFormatter release];
     }
     
     return defaultDateFormatters;
@@ -321,7 +326,7 @@ static NSDateFormatter *preferredDateFormatter = nil;
 }
 
 
-+ (void)addDefaultDateFormatter:(NSDateFormatter *)dateFormatter {
++ (void)addDefaultDateFormatter:(id)dateFormatter {
     [self defaultDateFormatters];
     [defaultDateFormatters addObject:dateFormatter];
 }

@@ -22,6 +22,8 @@
 #import "RKManagedObjectMapping.h"
 #import "RKHuman.h"
 #import "RKMappableObject.h"
+#import "RKChild.h"
+#import "RKParent.h"
 
 @interface RKManagedObjectMappingSpec : RKSpec {
     NSAutoreleasePool *_autoreleasePool;
@@ -153,6 +155,43 @@
     RKObjectMapper* mapper = [RKObjectMapper mapperWithObject:userInfo mappingProvider:provider];
     [mapper performMapping];
     [mockObjectStore verify];
+}
+
+- (void)testShouldPickTheAppropriateMappingBasedOnAnAttributeValue {
+    RKSpecNewManagedObjectStore();
+    RKDynamicObjectMapping* dynamicMapping = [RKDynamicObjectMapping dynamicMapping];
+    RKManagedObjectMapping* childMapping = [RKManagedObjectMapping mappingForClass:[RKChild class]];
+    childMapping.primaryKeyAttribute = @"railsID";
+    [childMapping mapAttributes:@"name", nil];
+    
+    RKManagedObjectMapping* parentMapping = [RKManagedObjectMapping mappingForClass:[RKParent class]];
+    parentMapping.primaryKeyAttribute = @"railsID";
+    [parentMapping mapAttributes:@"name", @"age", nil];
+    
+    [dynamicMapping setObjectMapping:parentMapping whenValueOfKeyPath:@"type" isEqualTo:@"Parent"];
+    [dynamicMapping setObjectMapping:childMapping whenValueOfKeyPath:@"type" isEqualTo:@"Child"];
+    
+    RKObjectMapping* mapping = [dynamicMapping objectMappingForDictionary:RKSpecParseFixture(@"parent.json")];
+    assertThat(mapping, is(notNilValue()));
+    assertThatBool([mapping isKindOfClass:[RKManagedObjectMapping class]], is(equalToBool(YES)));
+    assertThat(NSStringFromClass(mapping.objectClass), is(equalTo(@"RKParent")));
+    mapping = [dynamicMapping objectMappingForDictionary:RKSpecParseFixture(@"child.json")];
+    assertThat(mapping, is(notNilValue()));
+    assertThatBool([mapping isKindOfClass:[RKManagedObjectMapping class]], is(equalToBool(YES)));
+    assertThat(NSStringFromClass(mapping.objectClass), is(equalTo(@"RKChild")));
+}
+
+- (void)testShouldIncludeTransformableAttributesInPropertyNamesAndTypes {
+    RKSpecNewManagedObjectStore();
+    NSDictionary *attributesByName = [[RKHuman entity] attributesByName];
+    NSDictionary *propertiesByName = [[RKHuman entity] propertiesByName];
+    NSDictionary *relationshipsByName = [[RKHuman entity] relationshipsByName];
+    assertThat([attributesByName objectForKey:@"favoriteColors"], is(notNilValue()));
+    assertThat([propertiesByName objectForKey:@"favoriteColors"], is(notNilValue()));
+    assertThat([relationshipsByName objectForKey:@"favoriteColors"], is(nilValue()));
+
+    NSDictionary *propertyNamesAndTypes = [[RKObjectPropertyInspector sharedInspector] propertyNamesAndTypesForEntity:[RKHuman entity]];
+    assertThat([propertyNamesAndTypes objectForKey:@"favoriteColors"], is(notNilValue()));
 }
 
 @end

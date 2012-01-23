@@ -21,13 +21,21 @@
 #import "RKSpecEnvironment.h"
 
 @interface RKRequestQueueSpec : RKSpec {
-    
+    NSAutoreleasePool *_autoreleasePool;
 }
 
 @end
 
 
 @implementation RKRequestQueueSpec
+
+- (void)setUp {
+    _autoreleasePool = [NSAutoreleasePool new];
+}
+
+- (void)tearDown {
+    [_autoreleasePool drain];
+}
 
 - (void)testShouldBeSuspendedWhenInitialized {
     RKRequestQueue* queue = [RKRequestQueue new];
@@ -108,7 +116,7 @@
     OCMockObject* delegateMock = [OCMockObject niceMockForProtocol:@protocol(RKRequestQueueDelegate)];
     RKSpecResponseLoader* loader = [RKSpecResponseLoader responseLoader];
 
-    NSString* url = [NSString stringWithFormat:@"%@/ok-with-delay/0.3", RKSpecGetBaseURL()];
+    NSString* url = [NSString stringWithFormat:@"%@/ok-with-delay/0.3", RKSpecGetBaseURLString()];
     NSURL* URL = [NSURL URLWithString:url];
     RKRequest * request = [[RKRequest alloc] initWithURL:URL];
     request.delegate = loader;
@@ -120,6 +128,7 @@
     [queue start];
     [loader waitForResponse];
     [delegateMock verify];
+    [queue release];
 }
 
 // TODO: These tests cannot pass in the unit testing environment... Need to migrate to an integration
@@ -229,7 +238,8 @@
     RKRequestQueue *queue = [RKRequestQueue requestQueue];
     RKObjectManager *objectManager = RKSpecNewObjectManager();
     RKSpecResponseLoader *loader = [RKSpecResponseLoader responseLoader];
-    RKObjectLoader *objectLoader = [RKObjectLoader loaderWithResourcePath:@"/403" objectManager:objectManager delegate:loader];
+    RKObjectLoader *objectLoader = [objectManager loaderWithResourcePath:@"/403"];
+    objectLoader.delegate = loader;
     [queue addRequest:(RKRequest *)objectLoader];
     [queue start];
     [loader waitForResponse];
